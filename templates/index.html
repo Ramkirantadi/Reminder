@@ -1,0 +1,35 @@
+<!-- templates/index.html -->
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">Schedule a New Reminder</h2>
+
+<form method="POST" class="row g-3">
+    <div class="col-md-6">
+        <label for="email" class="form-label">Recipient E-mail</label>
+        <input type="email" class="form-control" id="email" name="email"
+               placeholder="you@example.com" required>
+    </div>
+
+    <div class="col-md-6">
+        <label for="subject" class="form-label">Subject (optional)</label>
+        <input type="text" class="form-control" id="subject" name="subject"
+               placeholder="Reminder">
+    </div>
+
+    <div class="col-12">
+        <label for="message" class="form-label">Message</label>
+        <textarea class="form-control" id="message" name="message"
+                  rows="4" required></textarea>
+    </div>
+
+    <div class="col-md-6">
+        <label for="remind_at" class="form-label">Send at ({{ tz }})</label>
+        <input type="datetime-local" class="form-control" id="remind_at"
+               name="remind_at" required>
+    </div>
+
+    <div class="col-12">
+        <button type="submit" class="btn btn-primary">Schedule</button>
+    </div>
+</form>
+{% endblock %}
