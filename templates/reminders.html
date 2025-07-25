@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1 class="mb-3">All Reminders</h1>
+<table class="table table-bordered table-hover">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Email</th>
+      <th>Subject</th>
+      <th>Message</th>
+      <th>Remind At ({{ tz }})</th>
+      <th>Sent?</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in reminders %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td>{{ r.email }}</td>
+      <td>{{ r.subject }}</td>
+      <td>{{ r.message }}</td>
+      <td>{{ r.remind_at_local().strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{{ 'Yes' if r.sent else 'No' }}</td>
+      <td>
+        <form method="post" action="{{ url_for('delete_reminder', rid=r.id) }}">
+          <button class="btn btn-sm btn-danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
