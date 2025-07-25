@@ -11,9 +11,9 @@
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
   <div class="container">
     <a class="navbar-brand" href="/">SmartReminder</a>
-    <a class="btn btn-light" href="{{ url_for('reminders') }}">All Reminders</a>
   </div>
 </nav>
+
 <div class="container">
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
@@ -28,6 +28,7 @@
 
   {% block content %}{% endblock %}
 </div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
