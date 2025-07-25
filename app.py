@@ -3,11 +3,11 @@ import re
 import logging
 from datetime import datetime, timezone
 
-# Fallback for Python < 3.9
+
 try:
-    from zoneinfo import ZoneInfo  # Python 3.9+
+    from zoneinfo import ZoneInfo  
 except ImportError:
-    from backports.zoneinfo import ZoneInfo  # Python < 3.9
+    from backports.zoneinfo import ZoneInfo  
 
 import smtplib
 from email.mime.text import MIMEText
@@ -18,9 +18,7 @@ from flask_sqlalchemy import SQLAlchemy
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 
-# ----------------------
-# Config / Setup
-# ----------------------
+
 load_dotenv()
 print("EMAIL_USER:", os.getenv("EMAIL_USER"))
 print("EMAIL_PASS:", os.getenv("EMAIL_PASS"))
@@ -28,13 +26,13 @@ print("EMAIL_PASS:", os.getenv("EMAIL_PASS"))
 
 DB_URL = os.getenv("DATABASE_URL", "sqlite:///reminders.db")
 TZ = os.getenv("TZ", "Asia/Kolkata")
-SCHEDULER_INTERVAL = int(os.getenv("SCHEDULER_INTERVAL", "60"))  # seconds, use 10 in dev if you want
+SCHEDULER_INTERVAL = int(os.getenv("SCHEDULER_INTERVAL", "60"))  
 
 EMAIL_USER = os.getenv("EMAIL_USER")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
 EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "SmartReminder")
 
-# Logging
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -63,7 +61,7 @@ class Reminder(db.Model):
 
 
 def valid_email(email: str) -> bool:
-    # Simple regex. For production, use a validation lib.
+    
     return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email))
 
 
@@ -91,7 +89,7 @@ def send_email(to_email: str, subject: str, body: str) -> bool:
 
 @app.context_processor
 def inject_globals():
-    # so you can use {{ tz }} in every template without passing it explicitly
+    
     return {"tz": TZ}
 
 
@@ -101,7 +99,7 @@ def index():
         email = request.form.get("email")
         subject = request.form.get("subject") or "Reminder"
         message = request.form.get("message")
-        remind_at_raw = request.form.get("remind_at")  # HTML datetime-local (naive)
+        remind_at_raw = request.form.get("remind_at")  
 
         if not (email and message and remind_at_raw):
             flash("All fields are required", "danger")
@@ -112,7 +110,7 @@ def index():
             return redirect(url_for("index"))
 
         try:
-            # Parse local time from browser (naive) and convert to UTC
+            
             local_dt = datetime.fromisoformat(remind_at_raw)
             local_dt = local_dt.replace(tzinfo=ZoneInfo(TZ))
             remind_at_utc = local_dt.astimezone(timezone.utc)
@@ -153,9 +151,7 @@ def delete_reminder(rid):
     return redirect(url_for("reminders"))
 
 
-# ----------------------
-# Background job
-# ----------------------
+
 def send_due_reminders():
     with app.app_context():
         logger.info("⏰ Scheduler tick: checking for due reminders...")
@@ -191,7 +187,7 @@ def init_app():
             scheduler.start()
             logger.info(f"Scheduler started (interval={SCHEDULER_INTERVAL}s, tz={TZ})")
 
-# Run init immediately on import (works for both dev and prod)
+
 init_app()
 
 
