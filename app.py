@@ -118,12 +118,6 @@ def index():
 
     return render_template("index.html")
 
-# Removed reminders() route for privacy
-# @app.route("/reminders")
-# def reminders():
-#     items = Reminder.query.order_by(Reminder.remind_at_utc.asc()).all()
-#     return render_template("reminders.html", reminders=items)
-
 @app.route("/delete/<int:rid>", methods=["POST"])
 def delete_reminder(rid):
     r = Reminder.query.get_or_404(rid)
@@ -164,4 +158,5 @@ def shutdown_session(exception=None):
     db.session.remove()
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
