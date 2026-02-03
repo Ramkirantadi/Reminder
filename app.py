@@ -14,19 +14,22 @@ from flask_sqlalchemy import SQLAlchemy
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 
+# -------------------- LOAD ENV --------------------
 load_dotenv()
 
 DB_URL = os.getenv("DATABASE_URL", "sqlite:///reminders.db")
 TZ = os.getenv("TZ", "Asia/Kolkata")
 SCHEDULER_INTERVAL = int(os.getenv("SCHEDULER_INTERVAL", "60"))
 
-EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "SmartReminder")
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 EMAIL_FROM = os.getenv("EMAIL_FROM")
+EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "SmartReminder")
 
+# -------------------- LOGGING --------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# -------------------- FLASK APP --------------------
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = DB_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
@@ -43,7 +46,7 @@ class Reminder(db.Model):
     remind_at_utc = db.Column(db.DateTime(timezone=True), nullable=False)
     sent = db.Column(db.Boolean, default=False, nullable=False)
     created_at_utc = db.Column(
-        db.Column(db.DateTime(timezone=True)),
+        db.DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc)
     )
 
@@ -53,7 +56,7 @@ def valid_email(email: str) -> bool:
 
 def send_email(to_email: str, subject: str, body: str) -> bool:
     if not SENDGRID_API_KEY or not EMAIL_FROM:
-        app.logger.error("SendGrid not configured properly")
+        logger.error("SendGrid environment variables not set")
         return False
 
     url = "https://api.sendgrid.com/v3/mail/send"
@@ -62,7 +65,7 @@ def send_email(to_email: str, subject: str, body: str) -> bool:
         "Content-Type": "application/json"
     }
 
-    data = {
+    payload = {
         "personalizations": [{
             "to": [{"email": to_email}],
             "subject": subject
@@ -78,10 +81,14 @@ def send_email(to_email: str, subject: str, body: str) -> bool:
     }
 
     try:
-        res = requests.post(url, headers=headers, json=data, timeout=15)
-        return res.status_code in (200, 202)
+        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        if response.status_code in (200, 202):
+            return True
+        else:
+            logger.error(f"SendGrid error {response.status_code}: {response.text}")
+            return False
     except Exception as e:
-        app.logger.error(f"Email send failed: {e}")
+        logger.error(f"Email send failed: {e}")
         return False
 
 # -------------------- ROUTES --------------------
@@ -101,21 +108,25 @@ def index():
             flash("Invalid email format", "danger")
             return redirect(url_for("index"))
 
-        local_dt = datetime.fromisoformat(remind_at_raw)
-        local_dt = local_dt.replace(tzinfo=ZoneInfo(TZ))
-        remind_at_utc = local_dt.astimezone(timezone.utc)
+        try:
+            local_dt = datetime.fromisoformat(remind_at_raw)
+            local_dt = local_dt.replace(tzinfo=ZoneInfo(TZ))
+            remind_at_utc = local_dt.astimezone(timezone.utc)
+        except Exception:
+            flash("Invalid date/time", "danger")
+            return redirect(url_for("index"))
 
         if remind_at_utc <= datetime.now(timezone.utc):
             flash("Reminder time must be in the future", "warning")
             return redirect(url_for("index"))
 
-        r = Reminder(
+        reminder = Reminder(
             email=email,
             subject=subject,
             message=message,
             remind_at_utc=remind_at_utc
         )
-        db.session.add(r)
+        db.session.add(reminder)
         db.session.commit()
 
         flash("🎉 Reminder scheduled successfully!", "success")
@@ -139,7 +150,7 @@ def send_due_reminders():
                 else:
                     logger.error(f"❌ Failed to send reminder {r.id} to {r.email}")
     except Exception as e:
-        logger.error(f"Reminder job error: {e}")
+        logger.error(f"Reminder job crashed: {e}")
 
 scheduler = BackgroundScheduler(timezone=TZ)
 scheduler.add_job(
@@ -160,6 +171,7 @@ def init_app():
 
 init_app()
 
+# -------------------- MAIN --------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
