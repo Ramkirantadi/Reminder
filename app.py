@@ -21,7 +21,7 @@ DB_URL = os.getenv("DATABASE_URL", "sqlite:///reminders.db")
 TZ = os.getenv("TZ", "Asia/Kolkata")
 SCHEDULER_INTERVAL = int(os.getenv("SCHEDULER_INTERVAL", "60"))
 
-SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").replace("\n", "").strip()
 EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "SmartReminder")
 
@@ -175,3 +175,4 @@ init_app()
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
