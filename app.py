@@ -8,10 +8,7 @@ try:
 except ImportError:
     from backports.zoneinfo import ZoneInfo
 
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-
+import requests
 from flask import Flask, render_template, request, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -23,9 +20,9 @@ DB_URL = os.getenv("DATABASE_URL", "sqlite:///reminders.db")
 TZ = os.getenv("TZ", "Asia/Kolkata")
 SCHEDULER_INTERVAL = int(os.getenv("SCHEDULER_INTERVAL", "60"))
 
-EMAIL_USER = os.getenv("EMAIL_USER")
-EMAIL_PASS = os.getenv("EMAIL_PASS")
 EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "SmartReminder")
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
+EMAIL_FROM = os.getenv("EMAIL_FROM")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,6 +34,7 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret")
 
 db = SQLAlchemy(app)
 
+# -------------------- MODEL --------------------
 class Reminder(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(255), nullable=False)
@@ -44,39 +42,49 @@ class Reminder(db.Model):
     message = db.Column(db.Text, nullable=False)
     remind_at_utc = db.Column(db.DateTime(timezone=True), nullable=False)
     sent = db.Column(db.Boolean, default=False, nullable=False)
-    created_at_utc = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at_utc = db.Column(
+        db.Column(db.DateTime(timezone=True)),
+        default=lambda: datetime.now(timezone.utc)
+    )
 
-    def remind_at_local(self):
-        return self.remind_at_utc.astimezone(ZoneInfo("Asia/Kolkata"))
-
+# -------------------- UTILS --------------------
 def valid_email(email: str) -> bool:
     return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email))
 
 def send_email(to_email: str, subject: str, body: str) -> bool:
-    if not (EMAIL_USER and EMAIL_PASS):
-        app.logger.warning("EMAIL_USER / EMAIL_PASS not configured; cannot send email.")
+    if not SENDGRID_API_KEY or not EMAIL_FROM:
+        app.logger.error("SendGrid not configured properly")
         return False
 
-    msg = MIMEMultipart()
-    msg['From'] = f"{EMAIL_FROM_NAME} <{EMAIL_USER}>"
-    msg['To'] = to_email
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain'))
+    url = "https://api.sendgrid.com/v3/mail/send"
+    headers = {
+        "Authorization": f"Bearer {SENDGRID_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "personalizations": [{
+            "to": [{"email": to_email}],
+            "subject": subject
+        }],
+        "from": {
+            "email": EMAIL_FROM,
+            "name": EMAIL_FROM_NAME
+        },
+        "content": [{
+            "type": "text/plain",
+            "value": body
+        }]
+    }
 
     try:
-        with smtplib.SMTP('smtp.gmail.com', 587) as server:
-            server.starttls()
-            server.login(EMAIL_USER, EMAIL_PASS)
-            server.send_message(msg)
-        return True
+        res = requests.post(url, headers=headers, json=data, timeout=15)
+        return res.status_code in (200, 202)
     except Exception as e:
         app.logger.error(f"Email send failed: {e}")
         return False
 
-@app.context_processor
-def inject_globals():
-    return {"tz": TZ}
-
+# -------------------- ROUTES --------------------
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
@@ -93,13 +101,9 @@ def index():
             flash("Invalid email format", "danger")
             return redirect(url_for("index"))
 
-        try:
-            local_dt = datetime.fromisoformat(remind_at_raw)
-            local_dt = local_dt.replace(tzinfo=ZoneInfo(TZ))
-            remind_at_utc = local_dt.astimezone(timezone.utc)
-        except Exception as e:
-            flash(f"Invalid date/time: {e}", "danger")
-            return redirect(url_for("index"))
+        local_dt = datetime.fromisoformat(remind_at_raw)
+        local_dt = local_dt.replace(tzinfo=ZoneInfo(TZ))
+        remind_at_utc = local_dt.astimezone(timezone.utc)
 
         if remind_at_utc <= datetime.now(timezone.utc):
             flash("Reminder time must be in the future", "warning")
@@ -109,54 +113,53 @@ def index():
             email=email,
             subject=subject,
             message=message,
-            remind_at_utc=remind_at_utc,
+            remind_at_utc=remind_at_utc
         )
         db.session.add(r)
         db.session.commit()
+
         flash("🎉 Reminder scheduled successfully!", "success")
         return redirect(url_for("index"))
 
     return render_template("index.html")
 
-@app.route("/delete/<int:rid>", methods=["POST"])
-def delete_reminder(rid):
-    r = Reminder.query.get_or_404(rid)
-    db.session.delete(r)
-    db.session.commit()
-    flash("Reminder deleted", "info")
-    return redirect(url_for("index"))
-
+# -------------------- SCHEDULER JOB --------------------
 def send_due_reminders():
-    with app.app_context():
-        logger.info("⏰ Checking for due reminders...")
-        now_utc = datetime.now(timezone.utc)
-        due = Reminder.query.filter_by(sent=False).filter(Reminder.remind_at_utc <= now_utc).all()
-        for r in due:
-            ok = send_email(r.email, r.subject, r.message)
-            if ok:
-                r.sent = True
-                db.session.add(r)
-                db.session.commit()
-                app.logger.info(f"✅ Sent reminder {r.id} to {r.email}")
-            else:
-                app.logger.error(f"❌ Failed to send reminder {r.id} to {r.email}")
+    try:
+        with app.app_context():
+            now_utc = datetime.now(timezone.utc)
+            due = Reminder.query.filter_by(sent=False)\
+                .filter(Reminder.remind_at_utc <= now_utc).all()
+
+            for r in due:
+                if send_email(r.email, r.subject, r.message):
+                    r.sent = True
+                    db.session.commit()
+                    logger.info(f"✅ Sent reminder {r.id} to {r.email}")
+                else:
+                    logger.error(f"❌ Failed to send reminder {r.id} to {r.email}")
+    except Exception as e:
+        logger.error(f"Reminder job error: {e}")
 
 scheduler = BackgroundScheduler(timezone=TZ)
-scheduler.add_job(send_due_reminders, "interval", seconds=SCHEDULER_INTERVAL, id="send_due_reminders")
+scheduler.add_job(
+    send_due_reminders,
+    "interval",
+    seconds=SCHEDULER_INTERVAL,
+    id="send_due_reminders",
+    max_instances=3,
+    coalesce=True
+)
 
 def init_app():
     with app.app_context():
         db.create_all()
         if not scheduler.running:
             scheduler.start()
-            logger.info(f"📅 Scheduler started: every {SCHEDULER_INTERVAL}s, TZ={TZ}")
+            logger.info("📅 Scheduler started")
 
 init_app()
 
-@app.teardown_appcontext
-def shutdown_session(exception=None):
-    db.session.remove()
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host="0.0.0.0", port=port)
